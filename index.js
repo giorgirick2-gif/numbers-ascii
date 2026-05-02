@@ -97,7 +97,7 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({ status: 'ok' }));
   }
 
-  // FIXED: Set streaming headers to prevent buffering
+  // Set streaming headers to prevent buffering and stuck frames
   res.writeHead(200, { 
     'Content-Type': 'text/plain; charset=utf-8',
     'Transfer-Encoding': 'chunked',
@@ -119,9 +119,12 @@ const server = http.createServer((req, res) => {
   res.on('error', onClose);
 });
 
-// FIXED: Listen on '0.0.0.0' so Render can detect the port
+// THE CRITICAL FIX: Listen on '0.0.0.0' instead of just 'localhost'
 const port = process.env.PORT || 3000;
-server.listen(port, '0.0.0.0', err => {
-  if (err) throw err;
-  console.log(`Server is running on port ${port}`);
+server.listen(port, '0.0.0.0', (err) => {
+  if (err) {
+    console.error('Error starting server:', err);
+    return;
+  }
+  console.log(`Server is finally public on port ${port}`);
 });
