@@ -1,13 +1,10 @@
 const fs = require('mz/fs');
 const path = require('path');
 const http = require('http');
-const url = require('url');
 const { Readable } = require('stream');
 const colors = require('colors/safe');
 
 let original = [];
-let flipped = [];
-
 (async () => {
   const framesPath = 'frames';
   const files = await fs.readdir(framesPath);
@@ -17,71 +14,44 @@ let flipped = [];
     const frame = await fs.readFile(path.join(framesPath, file));
     return frame.toString();
   }));
-
-  flipped = original.map(f => f.toString().split('').reverse().join(''));
-})().catch((err) => {
-  console.log('Error loading frames', err);
-});
+})().catch(err => console.log('Error:', err));
 
 const colorsOptions = ['red', 'yellow', 'green', 'blue', 'magenta', 'cyan', 'white'];
-const selectColor = prev => {
-  let c;
-  do { c = Math.floor(Math.random() * colorsOptions.length); } while (c === prev);
-  return c;
-};
-
-function streamer(stream, opts) {
-  const frames = opts.flip ? flipped : original;
-  let index = 0;
-  let lastColor;
-  let timer;
-
-  function tick() {
-    if (!frames.length) return;
-    // Clear screen and reset cursor
-    stream.push('\u001b[2J\u001b[H');
-
-    const colorIdx = lastColor = selectColor(lastColor);
-    const coloredFrame = colors[colorsOptions[colorIdx]](frames[index]);
-    
-    stream.push(coloredFrame);
-    index = (index + 1) % frames.length;
-    timer = setTimeout(tick, 70); // 70ms is roughly 14 FPS
-  }
-
-  tick();
-  return () => clearTimeout(timer);
-}
 
 const server = http.createServer((req, res) => {
-  if (req.url === '/healthcheck') {
-    return res.end(JSON.stringify({ status: 'ok' }));
-  }
+  if (req.url === '/healthcheck') return res.end('ok');
 
-  // SPEED FIX: Force no buffering
+  // MAX SPEED HEADERS
   res.writeHead(200, { 
     'Content-Type': 'text/plain; charset=utf-8',
     'Transfer-Encoding': 'chunked',
-    'Connection': 'keep-alive',
-    'X-Accel-Buffering': 'no', // Tells Nginx/Render to stop buffering
-    'Cache-Control': 'no-cache'
+    'X-Accel-Buffering': 'no', 
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive'
   });
-  
-  res.flushHeaders(); // Send headers immediately
 
-  const stream = new Readable({ read() {} });
-  stream.pipe(res);
+  // Create a high-speed loop
+  let index = 0;
+  const timer = setInterval(() => {
+    if (!original.length) return;
 
-  const query = url.parse(req.url, true).query;
-  const cleanup = streamer(stream, { flip: query.flip === 'true' });
+    // Combined command: Clear + Color + Frame
+    const color = colorsOptions[Math.floor(Math.random() * colorsOptions.length)];
+    const frame = original[index];
+    
+    // Using \x1b[H to reset cursor without flickering the whole screen
+    const output = `\x1b[2J\x1b[H${colors[color](frame)}`;
+    
+    // Force write directly to the socket bypasses Node's stream buffering
+    res.write(output);
 
-  res.on('close', () => {
-    cleanup();
-    stream.destroy();
-  });
+    index = (index + 1) % original.length;
+  }, 60); // Dropped to 60ms to compensate for Georgia-to-Cloud latency
+
+  res.on('close', () => clearInterval(timer));
 });
 
 const port = process.env.PORT || 10000;
 server.listen(port, '0.0.0.0', () => {
-  console.log(`Speed optimized server on port ${port}`);
+  console.log(`Overclocked server live on ${port}`);
 });
