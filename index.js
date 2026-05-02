@@ -5,15 +5,12 @@ const url = require('url');
 const { Readable } = require('stream');
 const colors = require('colors/safe');
 
-// Load frames into memory once
 let original = [];
 let flipped = [];
 
 (async () => {
   const framesPath = 'frames';
   const files = await fs.readdir(framesPath);
-
-  // Sort files numerically (1, 2, 3...) instead of alphabetically (1, 10, 11...)
   files.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
   original = await Promise.all(files.map(async (file) => {
@@ -21,35 +18,16 @@ let flipped = [];
     return frame.toString();
   }));
 
-  flipped = original.map(f => {
-    return f
-      .toString()
-      .split('')
-      .reverse()
-      .join('');
-  });
+  flipped = original.map(f => f.toString().split('').reverse().join(''));
 })().catch((err) => {
-  console.log('Error loading frames');
-  console.log(err);
+  console.log('Error loading frames', err);
 });
 
-const colorsOptions = [
-  'red',
-  'yellow',
-  'green',
-  'blue',
-  'magenta',
-  'cyan',
-  'white'
-];
-
-const numColors = colorsOptions.length;
-const selectColor = previousColor => {
-  let color;
-  do {
-    color = Math.floor(Math.random() * numColors);
-  } while (color === previousColor);
-  return color;
+const colorsOptions = ['red', 'yellow', 'green', 'blue', 'magenta', 'cyan', 'white'];
+const selectColor = prev => {
+  let c;
+  do { c = Math.floor(Math.random() * colorsOptions.length); } while (c === prev);
+  return c;
 };
 
 function streamer(stream, opts) {
@@ -60,73 +38,50 @@ function streamer(stream, opts) {
 
   function tick() {
     if (!frames.length) return;
-
     // Clear screen and reset cursor
-    stream.push('\u001b[2J\u001b[3J\u001b[H');
+    stream.push('\u001b[2J\u001b[H');
 
-    // Color frame
     const colorIdx = lastColor = selectColor(lastColor);
     const coloredFrame = colors[colorsOptions[colorIdx]](frames[index]);
-
-    // Push frame and check for backpressure
-    const ok = stream.push(coloredFrame);
+    
+    stream.push(coloredFrame);
     index = (index + 1) % frames.length;
-
-    if (ok) {
-      timer = setTimeout(tick, 70);
-    } else {
-      stream.once('drain', () => {
-        timer = setTimeout(tick, 70);
-      });
-    }
+    timer = setTimeout(tick, 70); // 70ms is roughly 14 FPS
   }
 
   tick();
-
-  return () => {
-    clearTimeout(timer);
-  };
+  return () => clearTimeout(timer);
 }
 
-const validateQuery = ({ flip }) => ({ flip: String(flip).toLowerCase() === 'true' });
-
 const server = http.createServer((req, res) => {
-  // Healthcheck route for Render
   if (req.url === '/healthcheck') {
-    res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ status: 'ok' }));
   }
 
-  // Set streaming headers
+  // SPEED FIX: Force no buffering
   res.writeHead(200, { 
     'Content-Type': 'text/plain; charset=utf-8',
     'Transfer-Encoding': 'chunked',
-    'Connection': 'keep-alive'
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no', // Tells Nginx/Render to stop buffering
+    'Cache-Control': 'no-cache'
   });
+  
+  res.flushHeaders(); // Send headers immediately
 
   const stream = new Readable({ read() {} });
   stream.pipe(res);
 
-  const opts = validateQuery(url.parse(req.url, true).query);
-  const cleanupLoop = streamer(stream, opts);
+  const query = url.parse(req.url, true).query;
+  const cleanup = streamer(stream, { flip: query.flip === 'true' });
 
-  const onClose = () => {
-    cleanupLoop();
+  res.on('close', () => {
+    cleanup();
     stream.destroy();
-  };
-
-  res.on('close', onClose);
-  res.on('error', onClose);
+  });
 });
 
-// Use Render's PORT or 10000
 const port = process.env.PORT || 10000;
-
-// THE FIX: Listen on '0.0.0.0' to allow external connections (Render's scanner)
 server.listen(port, '0.0.0.0', () => {
-  console.log(`Server is now public on port ${port}`);
+  console.log(`Speed optimized server on port ${port}`);
 });
-
-// Help Render's port scanner stay connected during the handshake
-server.keepAliveTimeout = 120000;
-server.headersTimeout = 120000;
