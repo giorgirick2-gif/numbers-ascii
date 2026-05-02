@@ -5,7 +5,6 @@ const url = require('url');
 const { Readable } = require('stream');
 const colors = require('colors/safe');
 
-// Setup frames in memory
 // Load frames into memory once
 let original = [];
 let flipped = [];
@@ -14,17 +13,21 @@ let flipped = [];
   const framesPath = 'frames';
   const files = await fs.readdir(framesPath);
 
+  // Sort files numerically to ensure 1, 2, 3... order
+  files.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
   original = await Promise.all(files.map(async (file) => {
     const frame = await fs.readFile(path.join(framesPath, file));
     return frame.toString();
   }));
+
   flipped = original.map(f => {
     return f
       .toString()
       .split('')
       .reverse()
-      .join('')
-  })
+      .join('');
+  });
 })().catch((err) => {
   console.log('Error loading frames');
   console.log(err);
@@ -39,14 +42,13 @@ const colorsOptions = [
   'cyan',
   'white'
 ];
+
 const numColors = colorsOptions.length;
 const selectColor = previousColor => {
   let color;
-
   do {
     color = Math.floor(Math.random() * numColors);
   } while (color === previousColor);
-
   return color;
 };
 
@@ -57,14 +59,16 @@ function streamer(stream, opts) {
   let timer;
 
   function tick() {
-    // clear screen
+    if (!frames.length) return;
+
+    // Clear screen and reset cursor
     stream.push('\u001b[2J\u001b[3J\u001b[H');
 
-    // color frame
+    // Color frame
     const colorIdx = lastColor = selectColor(lastColor);
     const coloredFrame = colors[colorsOptions[colorIdx]](frames[index]);
 
-    // try to push; respect backpressure
+    // Push frame and check for backpressure
     const ok = stream.push(coloredFrame);
     index = (index + 1) % frames.length;
 
@@ -77,10 +81,8 @@ function streamer(stream, opts) {
     }
   }
 
-  // start
   tick();
 
-  // cleanup function
   return () => {
     clearTimeout(timer);
   };
@@ -89,41 +91,36 @@ function streamer(stream, opts) {
 const validateQuery = ({ flip }) => ({ flip: String(flip).toLowerCase() === 'true' });
 
 const server = http.createServer((req, res) => {
-  // Healthcheck route
+  // Healthcheck route for Render
   if (req.url === '/healthcheck') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     return res.end(JSON.stringify({ status: 'ok' }));
   }
 
-  if (
-    req.headers &&
-    req.headers['user-agent'] &&
-    !req.headers['user-agent'].includes('curl')
-  ) {
-    res.writeHead(302, { Location: 'https://github.com/giorgirick2-gif/numbers-ascii' });
-    return res.end();
-  }
+  // Set streaming headers
+  res.writeHead(200, { 
+    'Content-Type': 'text/plain; charset=utf-8',
+    'Transfer-Encoding': 'chunked',
+    'Connection': 'keep-alive'
+  });
 
   const stream = new Readable({ read() {} });
-  res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
   stream.pipe(res);
 
-  // Start streaming with cleanup handler
   const opts = validateQuery(url.parse(req.url, true).query);
   const cleanupLoop = streamer(stream, opts);
 
-  // Clean up when the client disconnects
   const onClose = () => {
     cleanupLoop();
     stream.destroy();
   };
+
   res.on('close', onClose);
   res.on('error', onClose);
 });
 
-const port = process.env.PARROT_PORT || 3000;
+const port = process.env.PORT || 3000;
 server.listen(port, err => {
   if (err) throw err;
   console.log(`Listening on http://localhost:${port}`);
 });
-
