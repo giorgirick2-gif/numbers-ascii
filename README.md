@@ -1,4 +1,6 @@
-# parrot.live
+# numbers-ascii
+
+# THIS IS A FORK OF PARROT.LIVE A README.MD IS NOT A THING YET.
 
 An initiative, using frames from [`terminal-parrot`](https://github.com/jmhobbs/terminal-parrot), to allow any computer with `curl` to display an _animated_ party parrot.
 
