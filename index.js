@@ -13,7 +13,7 @@ let flipped = [];
   const framesPath = 'frames';
   const files = await fs.readdir(framesPath);
 
-  // Sort files numerically to ensure 1, 2, 3... order
+  // Sort files numerically (1, 2, 3...) instead of alphabetically (1, 10, 11...)
   files.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
   original = await Promise.all(files.map(async (file) => {
@@ -97,7 +97,7 @@ const server = http.createServer((req, res) => {
     return res.end(JSON.stringify({ status: 'ok' }));
   }
 
-  // Set streaming headers to prevent buffering and stuck frames
+  // Set streaming headers
   res.writeHead(200, { 
     'Content-Type': 'text/plain; charset=utf-8',
     'Transfer-Encoding': 'chunked',
@@ -119,12 +119,14 @@ const server = http.createServer((req, res) => {
   res.on('error', onClose);
 });
 
-// THE CRITICAL FIX: Listen on '0.0.0.0' instead of just 'localhost'
-const port = process.env.PORT || 3000;
-server.listen(port, '0.0.0.0', (err) => {
-  if (err) {
-    console.error('Error starting server:', err);
-    return;
-  }
-  console.log(`Server is finally public on port ${port}`);
+// Use Render's PORT or 10000
+const port = process.env.PORT || 10000;
+
+// THE FIX: Listen on '0.0.0.0' to allow external connections (Render's scanner)
+server.listen(port, '0.0.0.0', () => {
+  console.log(`Server is now public on port ${port}`);
 });
+
+// Help Render's port scanner stay connected during the handshake
+server.keepAliveTimeout = 120000;
+server.headersTimeout = 120000;
